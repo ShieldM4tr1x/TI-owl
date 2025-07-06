@@ -14,29 +14,33 @@ const lastUpdatedElement = document.getElementById('last-updated');
 document.addEventListener('DOMContentLoaded', async () => {
     await loadIOCs();
     setupEventListeners();
-    updateStats(); // Initial stats update
-    setInterval(updateStats, 300000); // Update every 5 minutes
 });
 
-// Determine correct base path for GitHub Pages
-function getBasePath() {
-    const isGitHubPages = window.location.host.includes('github.io');
-    const repoName = window.location.pathname.split('/')[1] || '';
-    return isGitHubPages ? `/${repoName}` : '';
-}
-
-// Load IOCs from JSON file
+// Load IOCs from JSON file or API
 async function loadIOCs() {
     try {
         showLoading();
-        const basePath = getBasePath();
-        const response = await fetch(`${basePath}/iocs.json?t=${Date.now()}`);
         
-        if (!response.ok) throw new Error('Failed to load IOCs');
+        // Try to load from local JSON first (for GitHub Pages)
+        const localResponse = await fetch('iocs.json');
+        if (localResponse.ok) {
+            const data = await localResponse.json();
+            allIOCs = data.iocs || [];
+            stats = data.stats || {};
+            updateStatsDisplay();
+            return;
+        }
         
-        const data = await response.json();
-        allIOCs = data.iocs || [];
-        stats = data.stats || {};
+        // Fallback to API if local file not found
+        const apiResponse = await fetch('http://localhost:5000/stats');
+        if (apiResponse.ok) {
+            stats = await apiResponse.json();
+            updateStatsDisplay();
+            
+            // Load IOCs when needed for search
+        } else {
+            console.error('Failed to load IOCs from both local and API');
+        }
     } catch (error) {
         console.error('Error loading IOCs:', error);
         showError('Failed to load IOC database. Please try again later.');
@@ -46,43 +50,24 @@ async function loadIOCs() {
 }
 
 // Update stats display
-function updateStats() {
-    const basePath = window.location.host.includes('github.io') 
-        ? '/TI-owl/frontend' 
-        : '/frontend';
+function updateStatsDisplay() {
+    totalIocsElement.textContent = stats.total?.toLocaleString() || '0';
     
-    fetch(`${basePath}/iocs.json?t=${Date.now()}`)
-        .then(response => {
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            return response.json();
-        })
-        .then(data => {
-            document.getElementById('total-iocs').textContent = 
-                data.stats?.total?.toLocaleString() || '0';
-            
-            if (data.stats?.last_updated) {
-                const options = {
-                    year: 'numeric',
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                };
-                document.getElementById('last-updated').textContent = 
-                    new Date(data.stats.last_updated).toLocaleString('en-US', options);
-            }
-        })
-        .catch(error => {
-            console.error('Failed to load IOCs:', error);
-            document.getElementById('last-updated').textContent = 'Error: ' + error.message;
-        });
+    if (stats.last_updated) {
+        const date = new Date(stats.last_updated);
+        lastUpdatedElement.textContent = date.toLocaleString();
+    } else {
+        lastUpdatedElement.textContent = 'Unknown';
+    }
 }
 
 // Setup event listeners
 function setupEventListeners() {
     searchButton.addEventListener('click', searchIOC);
     searchBox.addEventListener('keyup', (e) => {
-        if (e.key === 'Enter') searchIOC();
+        if (e.key === 'Enter') {
+            searchIOC();
+        }
     });
     
     // Debounced search as you type
@@ -90,13 +75,15 @@ function setupEventListeners() {
     searchBox.addEventListener('input', () => {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
-            if (searchBox.value.trim().length >= 3) searchIOC();
+            if (searchBox.value.trim().length >= 3) {
+                searchIOC();
+            }
         }, 500);
     });
 }
 
 // Main search function
-function searchIOC() {
+async function searchIOC() {
     const query = searchBox.value.trim().toLowerCase();
     
     if (query === '') {
@@ -108,7 +95,22 @@ function searchIOC() {
     showLoading();
     
     try {
-        const matches = allIOCs.filter(ioc => ioc.toLowerCase().includes(query));
+        let matches = [];
+        
+        if (allIOCs.length > 0) {
+            // Use local IOCs if loaded
+            matches = allIOCs.filter(ioc => ioc.toLowerCase().includes(query));
+        } else {
+            // Fallback to API search
+            const response = await fetch(`http://localhost:5000/search?q=${encodeURIComponent(query)}`);
+            if (response.ok) {
+                const data = await response.json();
+                matches = data.results || [];
+            } else {
+                throw new Error('API search failed');
+            }
+        }
+        
         displayResults(matches, query);
     } catch (error) {
         console.error('Search error:', error);
@@ -124,7 +126,11 @@ function displayResults(matches, query) {
     resultsCount.textContent = `${matches.length} ${matches.length === 1 ? 'match' : 'matches'}`;
     
     if (matches.length === 0) {
-        resultsList.innerHTML = `<div class="no-results">No results found for "${query}"</div>`;
+        resultsList.innerHTML = `
+            <div class="no-results">
+                No results found for "${query}"
+            </div>
+        `;
         return;
     }
     
@@ -132,20 +138,20 @@ function displayResults(matches, query) {
         const item = document.createElement('div');
         item.className = 'result-item';
         
-        // IOC type detection
+        // Simple IOC type detection
         let type = 'Unknown';
         let typeClass = '';
         
-        if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(match)) {
+        if (match.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
             type = 'IP';
             typeClass = 'ip-type';
-        } else if (/^[a-f0-9]{32}$/i.test(match) || /^[a-f0-9]{40}$/i.test(match) || /^[a-f0-9]{64}$/i.test(match)) {
+        } else if (match.match(/^[a-f0-9]{32}$/i) || match.match(/^[a-f0-9]{40}$/i) || match.match(/^[a-f0-9]{64}$/i)) {
             type = 'Hash';
             typeClass = 'hash-type';
-        } else if (/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(match)) {
+        } else if (match.match(/^[a-z0-9.-]+\.[a-z]{2,}$/i)) {
             type = 'Domain';
             typeClass = 'domain-type';
-        } else if (/^https?:\/\//i.test(match)) {
+        } else if (match.match(/^https?:\/\//i)) {
             type = 'URL';
             typeClass = 'url-type';
         }
@@ -160,21 +166,27 @@ function displayResults(matches, query) {
     if (matches.length > 100) {
         const more = document.createElement('div');
         more.className = 'no-results';
-        more.textContent = `Showing 100 of ${matches.length} matches.`;
+        more.textContent = `Showing 100 of ${matches.length} matches. Refine your search for better results.`;
         resultsList.appendChild(more);
     }
 }
 
-// Highlight matching parts
+// Highlight matching parts of the result
 function highlightMatch(text, query) {
     if (!query) return text;
+    
     const index = text.toLowerCase().indexOf(query.toLowerCase());
-    return index >= 0 
-        ? `${text.substring(0, index)}<span class="highlight">${text.substring(index, index + query.length)}</span>${text.substring(index + query.length)}`
-        : text;
+    if (index >= 0) {
+        return (
+            text.substring(0, index) +
+            `<span class="highlight">${text.substring(index, index + query.length)}</span>` +
+            text.substring(index + query.length)
+        );
+    }
+    return text;
 }
 
-// Loading states
+// Show loading indicator
 function showLoading() {
     resultsList.innerHTML = `
         <div class="loading">
@@ -184,12 +196,15 @@ function showLoading() {
     `;
 }
 
+// Hide loading indicator
 function hideLoading() {
+    // Only hide if still showing loading (might have been replaced by results)
     if (resultsList.innerHTML.includes('loading')) {
         resultsList.innerHTML = '';
     }
 }
 
+// Show error message
 function showError(message) {
     resultsList.innerHTML = `
         <div class="no-results error">
