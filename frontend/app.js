@@ -15,30 +15,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadIOCs();
     setupEventListeners();
     updateStats(); // Initial stats update
-    setInterval(updateStats, 300000); // Update stats every 5 minutes
+    setInterval(updateStats, 300000); // Update every 5 minutes
 });
 
-// Load IOCs from JSON file or API
+// Determine correct base path for GitHub Pages
+function getBasePath() {
+    const isGitHubPages = window.location.host.includes('github.io');
+    const repoName = window.location.pathname.split('/')[1] || '';
+    return isGitHubPages ? `/${repoName}` : '';
+}
+
+// Load IOCs from JSON file
 async function loadIOCs() {
     try {
         showLoading();
+        const basePath = getBasePath();
+        const response = await fetch(`${basePath}/iocs.json?t=${Date.now()}`);
         
-        // Try to load from local JSON first (for GitHub Pages)
-        const localResponse = await fetch('iocs.json');
-        if (localResponse.ok) {
-            const data = await localResponse.json();
-            allIOCs = data.iocs || [];
-            stats = data.stats || {};
-            return;
-        }
+        if (!response.ok) throw new Error('Failed to load IOCs');
         
-        // Fallback to API if local file not found
-        const apiResponse = await fetch('http://localhost:5000/stats');
-        if (apiResponse.ok) {
-            stats = await apiResponse.json();
-        } else {
-            console.error('Failed to load IOCs from both local and API');
-        }
+        const data = await response.json();
+        allIOCs = data.iocs || [];
+        stats = data.stats || {};
     } catch (error) {
         console.error('Error loading IOCs:', error);
         showError('Failed to load IOC database. Please try again later.');
@@ -47,12 +45,16 @@ async function loadIOCs() {
     }
 }
 
-// Update stats display with formatted data
+// Update stats display
 function updateStats() {
-    fetch('iocs.json')
-        .then(response => response.json())
+    const basePath = getBasePath();
+    fetch(`${basePath}/iocs.json?t=${Date.now()}`)
+        .then(response => {
+            if (!response.ok) throw new Error('Network error');
+            return response.json();
+        })
         .then(data => {
-            // Update total IOC count with thousand separators
+            // Update total IOC count
             totalIocsElement.textContent = data.stats.total?.toLocaleString() || '0';
             
             // Format last updated time (without seconds)
@@ -67,14 +69,11 @@ function updateStats() {
                 };
                 lastUpdatedElement.textContent = 
                     new Date(data.stats.last_updated).toLocaleString('en-US', options);
-            } else {
-                lastUpdatedElement.textContent = 'Unknown';
             }
         })
         .catch(error => {
             console.error('Error updating stats:', error);
-            totalIocsElement.textContent = 'Error';
-            lastUpdatedElement.textContent = 'Error';
+            lastUpdatedElement.textContent = 'Update failed';
         });
 }
 
@@ -96,7 +95,7 @@ function setupEventListeners() {
 }
 
 // Main search function
-async function searchIOC() {
+function searchIOC() {
     const query = searchBox.value.trim().toLowerCase();
     
     if (query === '') {
@@ -108,20 +107,7 @@ async function searchIOC() {
     showLoading();
     
     try {
-        let matches = [];
-        
-        if (allIOCs.length > 0) {
-            matches = allIOCs.filter(ioc => ioc.toLowerCase().includes(query));
-        } else {
-            const response = await fetch(`http://localhost:5000/search?q=${encodeURIComponent(query)}`);
-            if (response.ok) {
-                const data = await response.json();
-                matches = data.results || [];
-            } else {
-                throw new Error('API search failed');
-            }
-        }
-        
+        const matches = allIOCs.filter(ioc => ioc.toLowerCase().includes(query));
         displayResults(matches, query);
     } catch (error) {
         console.error('Search error:', error);
@@ -178,7 +164,7 @@ function displayResults(matches, query) {
     }
 }
 
-// Highlight matching parts of the result
+// Highlight matching parts
 function highlightMatch(text, query) {
     if (!query) return text;
     const index = text.toLowerCase().indexOf(query.toLowerCase());
@@ -187,26 +173,22 @@ function highlightMatch(text, query) {
         : text;
 }
 
-// Show loading indicator
+// Loading states
 function showLoading() {
-    if (!resultsList.innerHTML.includes('loading')) {
-        resultsList.innerHTML = `
-            <div class="loading">
-                <div class="spinner"></div>
-                <p>Searching...</p>
-            </div>
-        `;
-    }
+    resultsList.innerHTML = `
+        <div class="loading">
+            <div class="spinner"></div>
+            <p>Searching...</p>
+        </div>
+    `;
 }
 
-// Hide loading indicator
 function hideLoading() {
     if (resultsList.innerHTML.includes('loading')) {
         resultsList.innerHTML = '';
     }
 }
 
-// Show error message
 function showError(message) {
     resultsList.innerHTML = `
         <div class="no-results error">
