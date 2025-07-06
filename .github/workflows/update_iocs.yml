@@ -46,7 +46,7 @@ jobs:
         if: steps.verify.outputs.has_changes == 'true'
         run: |
           echo "Updating docs symlink..."
-          rm -f docs  # Safe delete (file or symlink)
+          rm -rf docs  # Safe delete (file or symlink)
           ln -s frontend docs
           git add docs
 
