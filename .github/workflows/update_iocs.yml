@@ -1,7 +1,7 @@
-name: Update IOCs Hourly
+name: Update IOCs
 on:
   schedule:
-    - cron: '0 * * * *'  # Runs at minute 0 of every hour
+    - cron: '0 * * * *'  # Runs at the start of every hour
   workflow_dispatch:     # Manual trigger option
 
 jobs:
@@ -9,8 +9,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Required for proper git history
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -23,12 +21,17 @@ jobs:
       - name: Run aggregator
         run: python backend/aggregator.py
 
+      - name: Sync to docs folder
+        run: |
+          mkdir -p docs
+          cp -r frontend/* docs/
+          # Preserve .nojekyll if exists
+          [ -f frontend/.nojekyll ] && cp frontend/.nojekyll docs/
+
       - name: Commit and Push Changes
-        if: success()  # Only run if previous steps succeeded
         run: |
           git config --global user.name 'GitHub Actions'
           git config --global user.email 'actions@github.com'
-          git add frontend/iocs.json
-          # Only commit if there are changes
+          git add docs frontend/iocs.json
           git diff --cached --quiet || (git commit -m "Auto-update IOCs [$(date +'%Y-%m-%d %H:%M UTC')]" && 
           git push "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:main)
