@@ -47,33 +47,34 @@ async function loadIOCs() {
 
 // Update stats display
 function updateStats() {
-    const basePath = getBasePath();
-    fetch(`${basePath}/frontend/iocs.json?t=${Date.now()}`)
+    const basePath = window.location.host.includes('github.io') 
+        ? '/TI-owl/frontend' 
+        : '/frontend';
+    
+    fetch(`${basePath}/iocs.json?t=${Date.now()}`)
         .then(response => {
-            if (!response.ok) throw new Error('Network error');
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             return response.json();
         })
         .then(data => {
-            // Update total IOC count
-            totalIocsElement.textContent = data.stats.total?.toLocaleString() || '0';
+            document.getElementById('total-iocs').textContent = 
+                data.stats?.total?.toLocaleString() || '0';
             
-            // Format last updated time (without seconds)
-            if (data.stats.last_updated) {
+            if (data.stats?.last_updated) {
                 const options = {
                     year: 'numeric',
                     month: 'short',
                     day: 'numeric',
                     hour: '2-digit',
-                    minute: '2-digit',
-                    hour12: true
+                    minute: '2-digit'
                 };
-                lastUpdatedElement.textContent = 
+                document.getElementById('last-updated').textContent = 
                     new Date(data.stats.last_updated).toLocaleString('en-US', options);
             }
         })
         .catch(error => {
-            console.error('Error updating stats:', error);
-            lastUpdatedElement.textContent = 'Update failed';
+            console.error('Failed to load IOCs:', error);
+            document.getElementById('last-updated').textContent = 'Error: ' + error.message;
         });
 }
 
