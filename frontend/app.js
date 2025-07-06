@@ -48,7 +48,7 @@ async function loadIOCs() {
 // Update stats display
 function updateStats() {
     const basePath = getBasePath();
-    fetch(`${basePath}/iocs.json?t=${Date.now()}`)
+    fetch(`${basePath}/frontend/iocs.json?t=${Date.now()}`)
         .then(response => {
             if (!response.ok) throw new Error('Network error');
             return response.json();
