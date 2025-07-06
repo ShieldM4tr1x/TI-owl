@@ -14,6 +14,8 @@ const lastUpdatedElement = document.getElementById('last-updated');
 document.addEventListener('DOMContentLoaded', async () => {
     await loadIOCs();
     setupEventListeners();
+    updateStats(); // Initial stats update
+    setInterval(updateStats, 300000); // Update stats every 5 minutes
 });
 
 // Load IOCs from JSON file or API
@@ -27,7 +29,6 @@ async function loadIOCs() {
             const data = await localResponse.json();
             allIOCs = data.iocs || [];
             stats = data.stats || {};
-            updateStatsDisplay();
             return;
         }
         
@@ -35,9 +36,6 @@ async function loadIOCs() {
         const apiResponse = await fetch('http://localhost:5000/stats');
         if (apiResponse.ok) {
             stats = await apiResponse.json();
-            updateStatsDisplay();
-            
-            // Load IOCs when needed for search
         } else {
             console.error('Failed to load IOCs from both local and API');
         }
@@ -49,25 +47,42 @@ async function loadIOCs() {
     }
 }
 
-// Update stats display
-function updateStatsDisplay() {
-    totalIocsElement.textContent = stats.total?.toLocaleString() || '0';
-    
-    if (stats.last_updated) {
-        const date = new Date(stats.last_updated);
-        lastUpdatedElement.textContent = date.toLocaleString();
-    } else {
-        lastUpdatedElement.textContent = 'Unknown';
-    }
+// Update stats display with formatted data
+function updateStats() {
+    fetch('iocs.json')
+        .then(response => response.json())
+        .then(data => {
+            // Update total IOC count with thousand separators
+            totalIocsElement.textContent = data.stats.total?.toLocaleString() || '0';
+            
+            // Format last updated time (without seconds)
+            if (data.stats.last_updated) {
+                const options = {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: true
+                };
+                lastUpdatedElement.textContent = 
+                    new Date(data.stats.last_updated).toLocaleString('en-US', options);
+            } else {
+                lastUpdatedElement.textContent = 'Unknown';
+            }
+        })
+        .catch(error => {
+            console.error('Error updating stats:', error);
+            totalIocsElement.textContent = 'Error';
+            lastUpdatedElement.textContent = 'Error';
+        });
 }
 
 // Setup event listeners
 function setupEventListeners() {
     searchButton.addEventListener('click', searchIOC);
     searchBox.addEventListener('keyup', (e) => {
-        if (e.key === 'Enter') {
-            searchIOC();
-        }
+        if (e.key === 'Enter') searchIOC();
     });
     
     // Debounced search as you type
@@ -75,9 +90,7 @@ function setupEventListeners() {
     searchBox.addEventListener('input', () => {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
-            if (searchBox.value.trim().length >= 3) {
-                searchIOC();
-            }
+            if (searchBox.value.trim().length >= 3) searchIOC();
         }, 500);
     });
 }
@@ -98,10 +111,8 @@ async function searchIOC() {
         let matches = [];
         
         if (allIOCs.length > 0) {
-            // Use local IOCs if loaded
             matches = allIOCs.filter(ioc => ioc.toLowerCase().includes(query));
         } else {
-            // Fallback to API search
             const response = await fetch(`http://localhost:5000/search?q=${encodeURIComponent(query)}`);
             if (response.ok) {
                 const data = await response.json();
@@ -126,11 +137,7 @@ function displayResults(matches, query) {
     resultsCount.textContent = `${matches.length} ${matches.length === 1 ? 'match' : 'matches'}`;
     
     if (matches.length === 0) {
-        resultsList.innerHTML = `
-            <div class="no-results">
-                No results found for "${query}"
-            </div>
-        `;
+        resultsList.innerHTML = `<div class="no-results">No results found for "${query}"</div>`;
         return;
     }
     
@@ -138,20 +145,20 @@ function displayResults(matches, query) {
         const item = document.createElement('div');
         item.className = 'result-item';
         
-        // Simple IOC type detection
+        // IOC type detection
         let type = 'Unknown';
         let typeClass = '';
         
-        if (match.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
+        if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(match)) {
             type = 'IP';
             typeClass = 'ip-type';
-        } else if (match.match(/^[a-f0-9]{32}$/i) || match.match(/^[a-f0-9]{40}$/i) || match.match(/^[a-f0-9]{64}$/i)) {
+        } else if (/^[a-f0-9]{32}$/i.test(match) || /^[a-f0-9]{40}$/i.test(match) || /^[a-f0-9]{64}$/i.test(match)) {
             type = 'Hash';
             typeClass = 'hash-type';
-        } else if (match.match(/^[a-z0-9.-]+\.[a-z]{2,}$/i)) {
+        } else if (/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(match)) {
             type = 'Domain';
             typeClass = 'domain-type';
-        } else if (match.match(/^https?:\/\//i)) {
+        } else if (/^https?:\/\//i.test(match)) {
             type = 'URL';
             typeClass = 'url-type';
         }
@@ -166,7 +173,7 @@ function displayResults(matches, query) {
     if (matches.length > 100) {
         const more = document.createElement('div');
         more.className = 'no-results';
-        more.textContent = `Showing 100 of ${matches.length} matches. Refine your search for better results.`;
+        more.textContent = `Showing 100 of ${matches.length} matches.`;
         resultsList.appendChild(more);
     }
 }
@@ -174,31 +181,26 @@ function displayResults(matches, query) {
 // Highlight matching parts of the result
 function highlightMatch(text, query) {
     if (!query) return text;
-    
     const index = text.toLowerCase().indexOf(query.toLowerCase());
-    if (index >= 0) {
-        return (
-            text.substring(0, index) +
-            `<span class="highlight">${text.substring(index, index + query.length)}</span>` +
-            text.substring(index + query.length)
-        );
-    }
-    return text;
+    return index >= 0 
+        ? `${text.substring(0, index)}<span class="highlight">${text.substring(index, index + query.length)}</span>${text.substring(index + query.length)}`
+        : text;
 }
 
 // Show loading indicator
 function showLoading() {
-    resultsList.innerHTML = `
-        <div class="loading">
-            <div class="spinner"></div>
-            <p>Searching...</p>
-        </div>
-    `;
+    if (!resultsList.innerHTML.includes('loading')) {
+        resultsList.innerHTML = `
+            <div class="loading">
+                <div class="spinner"></div>
+                <p>Searching...</p>
+            </div>
+        `;
+    }
 }
 
 // Hide loading indicator
 function hideLoading() {
-    // Only hide if still showing loading (might have been replaced by results)
     if (resultsList.innerHTML.includes('loading')) {
         resultsList.innerHTML = '';
     }
